@@ -1,0 +1,96 @@
+#!/bin/bash
+
+input=$1;
+port=$2;
+foundhosts="";
+
+
+############################################################
+# This is method to auto discover - you can change 
+# method to improve speed of discovery
+# querymethod choices are configured in function
+#  check_method :
+# you can change to :
+# host nslookup dig shortdig netcat nc ping disabled
+# disabled only suggested for vpn access
+
+querymethod="nc";
+############################################################
+
+#############################################################################################
+#SERVER CHECK METHODS
+function check_method()  {
+      if [ "$querymethod" == "nc" ]; then
+          nc -v  -w 1 $server -z $portid 2>&1|grep succeeded > /dev/null
+      elif [ "$querymethod" == "netcat" ]; then
+          netcat -v  -w 1 $server -z $portid 2>&1|grep succeeded >/dev/null
+      elif [ "$querymethod" == "host" ]; then
+          host $server | awk '/^[[:alnum:].-]+ has address/ { print $4 ; exit }' 2>&1|grep [1-9] > /dev/null
+      elif [ "$querymethod" == "nslookup" ]; then
+        nslookup $server | awk '/^Address: / { print $2 ; exit }'  2>&1|grep [1-9] > /dev/null
+      elif [ "$querymethod" == "dig" ]; then
+        dig  $server | awk '/^;; ANSWER SECTION:$/ { getline ; print $5 ; exit }'  2>&1|grep [1-9] > /dev/null
+      elif [ "$querymethod" == "shortdig" ]; then
+        dig +short $server | awk 'NR > 1 { exit } ; 1 2>&1|grep [1-9] > /dev/null'
+      elif [ "$querymethod" == "ping" ]; then
+        ping -c1 $server 2>&1|grep bytes > /dev/null
+      elif [ "$querymethod" == "disabled" ]; then
+        echo "succeeded" > /dev/null
+      else
+        nc -v  -w 1 $server -z $portid 2>&1|grep succeeded > /dev/null
+      fi
+      if [ $? = 0 ]; then
+		foundhosts=$foundhosts" "$server:$portid
+              	echo " $server:$portid querymethod = $querymethod  -- SUCCEEDED"
+      fi
+}
+#############################################################################################
+
+
+
+
+function get_servers() {
+	for ports in `echo $port`
+	do
+		port1=`echo $ports|sed 's:(:{:g; s:):}:g; s:|:,:g; s/^//;s/$//'`
+  		for times in `echo $port1|grep -o "\["`; do port1=`echo $port1|sed 's/\(.*\)\[\(.*\)-\(.*\)]\(.*\)/\1\{\2\.\.\3\}\4/g'`; done
+ 		brace_ports=$port1;
+		for portid in `(eval echo $brace_ports)`
+   		do
+
+
+ 			for names in `echo $input`
+ 			do 
+  				server=`echo $names|sed 's:(:{:g; s:):}:g; s:|:,:g; s/^//;s/$//'`
+  				for times in `echo $server|grep -o "\["`; do server=`echo $server|sed 's/\(.*\)\[\(.*\)-\(.*\)]\(.*\)/\1\{\2\.\.\3\}\4/g'`; done
+  				brace_expansion=$server;
+ 				IF=$'\n';
+   				for server in `(eval echo $brace_expansion)`
+   				do
+        				check_method;
+   				done
+			done
+
+		done
+	done
+}
+
+
+function connect_jconsole() { 
+                if [ "$foundhosts" != "" ];then
+			jconsole $foundhosts  2>/dev/null &
+                else
+                        echo "No Hosts >$foundhosts have been resolved jconsole will not be launched"
+                fi
+}
+
+
+if [ $# -eq 0 -o $# -lt 2 ]; then
+   echo "$0 \"host\" \"port\"";
+   echo "$0 \"host1 host2\" \"500[1-2]\"";
+   echo "$0 \"host[1-2]\" \"500[1-2]\"";
+    exit 1;
+fi
+
+get_servers;
+connect_jconsole;
